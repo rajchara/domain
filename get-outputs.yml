@@ -1,0 +1,65 @@
+name: Get Securable Inventory
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Environment to get inventory for
+        required: true
+        type: string
+    outputs:
+      securable_ids:
+        description: JSON containing all securable IDs
+        value: ${{ jobs.get-inventory.outputs.securable_ids }}
+      workspace_id:
+        description: Databricks workspace ID
+        value: ${{ jobs.get-inventory.outputs.workspace_id }}
+      workspace_url:
+        description: Databricks workspace URL
+        value: ${{ jobs.get-inventory.outputs.workspace_url }}
+
+jobs:
+  get-inventory:
+    runs-on: ubuntu-latest
+    outputs:
+      securable_ids: ${{ steps.parse-inventory.outputs.securable_ids }}
+      workspace_id: ${{ steps.parse-inventory.outputs.workspace_id }}
+      workspace_url: ${{ steps.parse-inventory.outputs.workspace_url }}
+    steps:
+      - name: Retrieve from DocumentDB
+        run: |
+          mongosh "$DOCDB_CONNECTION_STRING" --eval "
+            db.securable_inventory.findOne({environment: '${{ inputs.environment }}'}, {_id: 0, updated_at: 0})
+          " --quiet | jq . > securable-inventory-${{ inputs.environment }}.json || \
+          echo "DocumentDB record not found, trying artifact download"
+        env:
+          DOCDB_CONNECTION_STRING: ${{ vars.DOCDB_CONNECTION_STRING }}
+          
+      - name: Download Securable Inventory (fallback)
+        if: ${{ !hashFiles('securable-inventory-*.json') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: securable-inventory-${{ inputs.environment }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Parse Inventory
+        id: parse-inventory
+        run: |
+          INVENTORY_FILE="securable-inventory-${{ inputs.environment }}.json"
+          if [ -f "$INVENTORY_FILE" ]; then
+            INVENTORY_JSON=$(cat "$INVENTORY_FILE")
+            echo "securable_ids=$INVENTORY_JSON" >> $GITHUB_OUTPUT
+            
+            WORKSPACE_ID=$(echo "$INVENTORY_JSON" | jq -r '.workspace_id')
+            WORKSPACE_URL=$(echo "$INVENTORY_JSON" | jq -r '.workspace_url')
+            
+            echo "workspace_id=$WORKSPACE_ID" >> $GITHUB_OUTPUT
+            echo "workspace_url=$WORKSPACE_URL" >> $GITHUB_OUTPUT
+            
+            echo "Securable inventory loaded successfully"
+            echo "Workspace ID: $WORKSPACE_ID"
+            echo "Workspace URL: $WORKSPACE_URL"
+          else
+            echo "Error: Securable inventory file not found"
+            exit 1
+          fi
