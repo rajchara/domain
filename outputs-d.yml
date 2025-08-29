@@ -1,0 +1,47 @@
+name: TF Outputs to Domain Integration
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      workspace_url:
+        required: true
+        type: string
+      catalog_ids:
+        required: true
+        type: string
+      schema_ids:
+        required: true
+        type: string
+      external_location_ids:
+        required: true
+        type: string
+    outputs:
+      domain_config:
+        value: ${{ jobs.transform.outputs.domain_config }}
+
+jobs:
+  transform:
+    runs-on: ubuntu-latest
+    outputs:
+      domain_config: ${{ steps.create-config.outputs.domain_config }}
+    steps:
+      - name: Transform TF Outputs to Domain Config
+        id: create-config
+        run: |
+          cat > domain-config.json << EOF
+          {
+            "workspace_url": "${{ inputs.workspace_url }}",
+            "securables": {
+              "catalogs": ${{ inputs.catalog_ids }},
+              "schemas": ${{ inputs.schema_ids }},
+              "external_locations": ${{ inputs.external_location_ids }}
+            },
+            "environment": "${{ inputs.environment }}"
+          }
+          EOF
+          
+          DOMAIN_CONFIG=$(cat domain-config.json | jq -c .)
+          echo "domain_config=$DOMAIN_CONFIG" >> $GITHUB_OUTPUT
